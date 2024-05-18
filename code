@@ -1,0 +1,146 @@
+#加载Python库
+import numpy as np
+#加载数据预处理模块
+import pandas as pd
+#加载绘图模块
+import matplotlib.pyplot as plt
+import seaborn as sns
+sns.set_style(style="darkgrid")
+
+#数据读取
+X = pd.read_csv(r"data\telecom.csv",encoding="utf8")
+X.head(2)  
+
+# 数据标准化
+from sklearn import preprocessing
+X_scaled = preprocessing.scale(X)
+X_scaled
+
+# 使用PCA进行数据降维
+from sklearn.decomposition import PCA
+#此处的主成分维度我们人为设定为3，对于属性较少的数据集，属于常规会选择的维度数，后面也会看到，这个也是出于可以可视化的需求
+pca = PCA(n_components = 3)
+#将设置了维数的模型作用到标准化后的数据集并输出查看
+X_pca = pca.fit_transform(X_scaled)
+X_pca_frame = pd.DataFrame(X_pca,columns=['pca_1','pca_2','pca_3'])
+
+X_pca_frame.head(5)
+
+pd.DataFrame(pca.components_,columns = X.columns, index=['pca_1','pca_2','pca_3']).T 
+
+# 对不同的k值进行计算，筛选最优的k值
+from mpl_toolkits.mplot3d import Axes3D
+from sklearn import metrics
+from sklearn.cluster import KMeans
+#KMeans算法实例化，将其设置为K=range(2,14)
+d={}
+fig_reduced_data=plt.figure(figsize=(12,12))
+for k in range(2,14):
+    est=KMeans(n_clusters=k,random_state=111)
+    #作用到降维后的数据集上
+    y_pred=est.fit_predict(X_pca)
+    #评估不同K值聚类算法效果
+    score=metrics.calinski_harabaz_score(X_pca_frame,y_pred)
+    d.update({k: score})
+    print('calinski_harabaz_score with k={0} is {1}'.format(k,score))
+
+#绘制不同k值对应的score，找到最优的k值
+x=[]
+y=[]
+for k,score in d.items():
+    x.append(k)
+    y.append(score)
+
+plt.plot(x,y)
+plt.xlabel('k value')
+plt.ylabel('calinski_harabasz_score')
+
+# K-means聚类建模
+#运行KMeans聚类算法
+from sklearn.cluster import KMeans
+#此处指定k=10
+est = KMeans(n_clusters=10)
+est.fit(X_pca)
+#获取数据标签值
+kmeans_clustering_labels = pd.DataFrame(est.labels_,columns=['cluster'])
+#将聚类结果与降维特征数据进行拼接
+X_pca_frame = pd.concat([X_pca_frame,kmeans_clustering_labels], axis=1) 
+X_pca_frame.head(5)
+
+#样本筛选
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+X.index = X_pca_frame.index
+X_full = pd.concat([X, X_pca_frame],axis=1)
+grouped = X_full.groupby('cluster')
+result_data = pd.DataFrame()
+#此处利用箱型图进行异常值分析
+for name,group in grouped:
+    print (name,group['pca_1'].count())
+    desp = group[['pca_1','pca_2','pca_3']].describe()
+    for att in ['pca_1','pca_2','pca_3']:
+        lower25 = desp.loc['25%',att]
+        upper75 = desp.loc['75%',att]
+        IQR = upper75 - lower25
+        min_value = lower25 - 1.5*IQR
+        max_value = upper75 + 1.5*IQR
+        group = group[(group[att] > min_value) & (group[att] < max_value) ]
+    result_data = pd.concat([result_data, group],axis=0)
+    print(name,group['pca_1'].count())
+#分别列出 筛选前后每个特征的数量
+print('remanin sample : ',result_data['pca_1'].count())
+
+#查看降维数据
+#1)主成分
+components_frame = pd.DataFrame(pca.components_,index=[u'主成分1',u'主成分2',u'主成分3'],columns=X.columns)
+#2）降维数据和聚类初步结果
+X_full.groupby('cluster').describe()
+
+result_data.groupby('cluster').describe()
+
+#绘图
+cluster_2_color = {0:'red',1:'green',2:'blue',3:'yellow',4:'cyan',5:'black',6:'magenta', 7:'#fff0f5', 8:'#ffdab9',9:'#ffa500' }
+#1. 原始数据降维后的可视化图
+fig_reduced_data = plt.figure()
+ax_reduced_data = fig_reduced_data.add_subplot(111, projection='3d')
+ax_reduced_data.scatter(X_pca_frame['pca_1'].values,X_pca_frame['pca_2'].values,X_pca_frame['pca_3'].values)
+ax_reduced_data.set_xlabel('Component 1')
+ax_reduced_data.set_ylabel('Component 2')
+ax_reduced_data.set_zlabel('Component 3')
+
+#2. 聚类之后的数据可视化图
+colors_clustered_data = X_pca_frame['cluster'].map(cluster_2_color)
+fig_clustered_data = plt.figure()
+ax_clustered_data = fig_clustered_data.add_subplot(111, projection='3d')
+ax_clustered_data.scatter(X_pca_frame['pca_1'].values,X_pca_frame['pca_2'].values,X_pca_frame['pca_3'].values,c=colors_clustered_data)
+ax_clustered_data.set_xlabel('Component 1')
+ax_clustered_data.set_ylabel('Component 2')
+ax_clustered_data.set_zlabel('Component 3')
+
+#3. 筛选后的数据聚类可视化图
+colors_filtered_data = result_data['cluster'].map(cluster_2_color)
+fig_filtered_data = plt.figure()
+ax_filtered_data = fig_filtered_data.add_subplot(111, projection='3d')
+ax_filtered_data.scatter(result_data['pca_1'].values,result_data['pca_2'].values,result_data['pca_3'].values,c=colors_filtered_data)
+ax_filtered_data.set_xlabel('Component 1')
+ax_filtered_data.set_ylabel('Component 2')
+ax_filtered_data.set_zlabel('Component 3')
+
+#4. 每个聚类的在pca1,pca2,pca3上的均值可视化图
+grouped = result_data.groupby('cluster')
+#每一个聚类的盒图
+colors = result_data['cluster'].map(cluster_2_color)
+fig = plt.figure()
+ax = fig.add_subplot(111, projection='3d')
+ax.scatter(result_data['pca_1'].values,result_data['pca_2'].values,result_data['pca_3'].values,c=colors)
+ax.set_xlabel('1st component')
+ax.set_ylabel('2nd component')
+ax.set_zlabel('3rd component')
+plt.show()
+
+X_full["arrearage"] = X_full[u"欠费金额"]
+X_full["telephone_fare"] = X_full[u"每月话费"]
+X_full["month_of_access"] = X_full[u"入网时间"]
+%matplotlib inline
+X_full.groupby("cluster")[["arrearage","telephone_fare","month_of_access"]].mean().plot(kind="bar")
+
